@@ -454,13 +454,15 @@ func (m *pdMemberManager) getNewPDServiceForTidbCluster(tc *v1alpha1.TidbCluster
 			Selector: pdSelector.Labels(),
 		},
 	}
-	// if set pd service type ,overwrite global variable services
+
+	// override fields with user-defined ServiceSpec
 	svcSpec := tc.Spec.PD.Service
 	if svcSpec != nil {
 		if svcSpec.Type != "" {
 			pdService.Spec.Type = svcSpec.Type
 		}
-		pdService.ObjectMeta.Annotations = CopyAnnotations(svcSpec.Annotations)
+		pdService.ObjectMeta.Annotations = util.CopyStringMap(svcSpec.Annotations)
+		pdService.ObjectMeta.Labels = util.CombineStringMap(pdService.ObjectMeta.Labels, svcSpec.Labels)
 		if svcSpec.LoadBalancerIP != nil {
 			pdService.Spec.LoadBalancerIP = *svcSpec.LoadBalancerIP
 		}
@@ -674,9 +676,10 @@ func getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap) (
 		return nil, fmt.Errorf("cannot parse storage request for PD, tidbcluster %s/%s, error: %v", tc.Namespace, tc.Name, err)
 	}
 
-	pdLabel := label.New().Instance(instanceName).PD()
 	setName := controller.PDMemberName(tcName)
-	podAnnotations := CombineAnnotations(controller.AnnProm(2379), basePDSpec.Annotations())
+	stsLabels := label.New().Instance(instanceName).PD()
+	podLabels := util.CombineStringMap(stsLabels, basePDSpec.Labels())
+	podAnnotations := util.CombineStringMap(controller.AnnProm(2379), basePDSpec.Annotations())
 	stsAnnotations := getStsAnnotations(tc.Annotations, label.PDLabelVal)
 
 	deleteSlotsNumber, err := util.GetDeleteSlotsNumber(stsAnnotations)
@@ -767,16 +770,16 @@ func getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap) (
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            setName,
 			Namespace:       ns,
-			Labels:          pdLabel.Labels(),
+			Labels:          stsLabels.Labels(),
 			Annotations:     stsAnnotations,
 			OwnerReferences: []metav1.OwnerReference{controller.GetOwnerRef(tc)},
 		},
 		Spec: apps.StatefulSetSpec{
 			Replicas: pointer.Int32Ptr(tc.PDStsDesiredReplicas()),
-			Selector: pdLabel.LabelSelector(),
+			Selector: stsLabels.LabelSelector(),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels:      pdLabel.Labels(),
+					Labels:      podLabels,
 					Annotations: podAnnotations,
 				},
 				Spec: podSpec,
@@ -887,6 +890,7 @@ func (m *pdMemberManager) collectUnjoinedMembers(tc *v1alpha1.TidbCluster, set *
 	}
 
 	// check all pods in PD sts to see whether it has already joined the PD cluster
+	unjoined := map[string]v1alpha1.UnjoinedMember{}
 	for _, pod := range pods {
 		var joined = false
 		// if current PD pod name is in the keys of pdStatus, it has joined the PD cluster
@@ -901,9 +905,6 @@ func (m *pdMemberManager) collectUnjoinedMembers(tc *v1alpha1.TidbCluster, set *
 			}
 		}
 		if !joined {
-			if tc.Status.PD.UnjoinedMembers == nil {
-				tc.Status.PD.UnjoinedMembers = map[string]v1alpha1.UnjoinedMember{}
-			}
 			pvcs, err := util.ResolvePVCFromPod(pod, m.deps.PVCLister)
 			if err != nil {
 				return fmt.Errorf("collectUnjoinedMembers: failed to get pvcs for pod %s/%s, error: %s", ns, pod.Name, err)
@@ -912,15 +913,15 @@ func (m *pdMemberManager) collectUnjoinedMembers(tc *v1alpha1.TidbCluster, set *
 			for _, pvc := range pvcs {
 				pvcUIDSet[pvc.UID] = struct{}{}
 			}
-			tc.Status.PD.UnjoinedMembers[pod.Name] = v1alpha1.UnjoinedMember{
+			unjoined[pod.Name] = v1alpha1.UnjoinedMember{
 				PodName:   pod.Name,
 				PVCUIDSet: pvcUIDSet,
 				CreatedAt: metav1.Now(),
 			}
-		} else {
-			delete(tc.Status.PD.UnjoinedMembers, pod.Name)
 		}
 	}
+
+	tc.Status.PD.UnjoinedMembers = unjoined
 	return nil
 }
 

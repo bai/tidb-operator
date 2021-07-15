@@ -253,7 +253,8 @@ string
 <td>
 <em>(Optional)</em>
 <p>ToolImage specifies the tool image used in <code>Backup</code>, which supports BR and Dumpling images.
-For examples <code>spec.toolImage: pingcap/br:v4.0.8</code> or <code>spec.toolImage: pingcap/dumpling:v4.0.8</code></p>
+For examples <code>spec.toolImage: pingcap/br:v4.0.8</code> or <code>spec.toolImage: pingcap/dumpling:v4.0.8</code>
+For BR image, if it does not contain tag, Pod will use image &lsquo;ToolImage:${TiKV_Version}&rsquo;.</p>
 </td>
 </tr>
 <tr>
@@ -342,6 +343,17 @@ Kubernetes core/v1.PodSecurityContext
 <td>
 <em>(Optional)</em>
 <p>PodSecurityContext of the component</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>priorityClassName</code></br>
+<em>
+string
+</em>
+</td>
+<td>
+<p>PriorityClassName of Backup Job Pods</p>
 </td>
 </tr>
 </table>
@@ -808,7 +820,21 @@ map[string]string
 </td>
 <td>
 <em>(Optional)</em>
-<p>Base annotations of DM cluster Pods, components may add or override selectors upon this respectively</p>
+<p>Additional annotations for the dm cluster
+Can be overrode by annotations in master spec or worker spec</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>labels</code></br>
+<em>
+map[string]string
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Additional labels for the dm cluster
+Can be overrode by labels in master spec or worker spec</p>
 </td>
 </tr>
 <tr>
@@ -1137,7 +1163,8 @@ string
 <td>
 <em>(Optional)</em>
 <p>ToolImage specifies the tool image used in <code>Restore</code>, which supports BR and TiDB Lightning images.
-For examples <code>spec.toolImage: pingcap/br:v4.0.8</code> or <code>spec.toolImage: pingcap/tidb-lightning:v4.0.8</code></p>
+For examples <code>spec.toolImage: pingcap/br:v4.0.8</code> or <code>spec.toolImage: pingcap/tidb-lightning:v4.0.8</code>
+For BR image, if it does not contain tag, Pod will use image &lsquo;ToolImage:${TiKV_Version}&rsquo;.</p>
 </td>
 </tr>
 <tr>
@@ -1177,6 +1204,17 @@ Kubernetes core/v1.PodSecurityContext
 <td>
 <em>(Optional)</em>
 <p>PodSecurityContext of the component</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>priorityClassName</code></br>
+<em>
+string
+</em>
+</td>
+<td>
+<p>PriorityClassName of Restore Job Pods</p>
 </td>
 </tr>
 </table>
@@ -1558,7 +1596,21 @@ map[string]string
 </td>
 <td>
 <em>(Optional)</em>
-<p>Base annotations of TiDB cluster Pods, components may add or override selectors upon this respectively</p>
+<p>Base annotations for TiDB cluster, all Pods in the cluster should have these annotations.
+Can be overrode by annotations in the specific component spec.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>labels</code></br>
+<em>
+map[string]string
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Base labels for TiDB cluster, all Pods in the cluster should have these labels.
+Can be overrode by labels in the specific component spec.</p>
 </td>
 </tr>
 <tr>
@@ -2284,6 +2336,17 @@ map[string]string
 <tr>
 <td>
 <code>annotations</code></br>
+<em>
+map[string]string
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+</td>
+</tr>
+<tr>
+<td>
+<code>labels</code></br>
 <em>
 map[string]string
 </em>
@@ -3169,7 +3232,8 @@ string
 <td>
 <em>(Optional)</em>
 <p>ToolImage specifies the tool image used in <code>Backup</code>, which supports BR and Dumpling images.
-For examples <code>spec.toolImage: pingcap/br:v4.0.8</code> or <code>spec.toolImage: pingcap/dumpling:v4.0.8</code></p>
+For examples <code>spec.toolImage: pingcap/br:v4.0.8</code> or <code>spec.toolImage: pingcap/dumpling:v4.0.8</code>
+For BR image, if it does not contain tag, Pod will use image &lsquo;ToolImage:${TiKV_Version}&rsquo;.</p>
 </td>
 </tr>
 <tr>
@@ -3258,6 +3322,17 @@ Kubernetes core/v1.PodSecurityContext
 <td>
 <em>(Optional)</em>
 <p>PodSecurityContext of the component</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>priorityClassName</code></br>
+<em>
+string
+</em>
+</td>
+<td>
+<p>PriorityClassName of Backup Job Pods</p>
 </td>
 </tr>
 </tbody>
@@ -3636,6 +3711,34 @@ Optional: Defaults to range</p>
 </tr>
 </tbody>
 </table>
+<h3 id="cdcconfigwraper">CDCConfigWraper</h3>
+<p>
+(<em>Appears on:</em>
+<a href="#ticdcspec">TiCDCSpec</a>)
+</p>
+<p>
+<p>CDCConfigWraper simply wrapps a GenericConfig</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>GenericConfig</code></br>
+<em>
+github.com/pingcap/tidb-operator/pkg/util/config.GenericConfig
+</em>
+</td>
+<td>
+</td>
+</tr>
+</tbody>
+</table>
 <h3 id="cleanpolicytype">CleanPolicyType</h3>
 <p>
 (<em>Appears on:</em>
@@ -3965,7 +4068,20 @@ map[string]string
 </td>
 <td>
 <em>(Optional)</em>
-<p>Annotations of the component. Merged into the cluster-level annotations if non-empty
+<p>Annotations for the component. Merge into the cluster-level annotations if non-empty
+Optional: Defaults to cluster-level setting</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>labels</code></br>
+<em>
+map[string]string
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Labels for the component. Merge into the cluster-level labels if non-empty
 Optional: Defaults to cluster-level setting</p>
 </td>
 </tr>
@@ -4787,7 +4903,21 @@ map[string]string
 </td>
 <td>
 <em>(Optional)</em>
-<p>Base annotations of DM cluster Pods, components may add or override selectors upon this respectively</p>
+<p>Additional annotations for the dm cluster
+Can be overrode by annotations in master spec or worker spec</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>labels</code></br>
+<em>
+map[string]string
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Additional labels for the dm cluster
+Can be overrode by labels in master spec or worker spec</p>
 </td>
 </tr>
 <tr>
@@ -6148,6 +6278,19 @@ IngressSpec
 </td>
 <td>
 <em>(Optional)</em>
+</td>
+</tr>
+<tr>
+<td>
+<code>additionalVolumeMounts</code></br>
+<em>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.18/#volumemount-v1-core">
+[]Kubernetes core/v1.VolumeMount
+</a>
+</em>
+</td>
+<td>
+<p>Additional volume mounts of grafana pod.</p>
 </td>
 </tr>
 </tbody>
@@ -10546,6 +10689,16 @@ Kubernetes apps/v1.StatefulSetStatus
 <td>
 </td>
 </tr>
+<tr>
+<td>
+<code>members</code></br>
+<em>
+[]*github.com/pingcap/tidb-operator/pkg/binlog.NodeStatus
+</em>
+</td>
+<td>
+</td>
+</tr>
 </tbody>
 </table>
 <h3 id="queueconfig">QueueConfig</h3>
@@ -11234,7 +11387,8 @@ string
 <td>
 <em>(Optional)</em>
 <p>ToolImage specifies the tool image used in <code>Restore</code>, which supports BR and TiDB Lightning images.
-For examples <code>spec.toolImage: pingcap/br:v4.0.8</code> or <code>spec.toolImage: pingcap/tidb-lightning:v4.0.8</code></p>
+For examples <code>spec.toolImage: pingcap/br:v4.0.8</code> or <code>spec.toolImage: pingcap/tidb-lightning:v4.0.8</code>
+For BR image, if it does not contain tag, Pod will use image &lsquo;ToolImage:${TiKV_Version}&rsquo;.</p>
 </td>
 </tr>
 <tr>
@@ -11274,6 +11428,17 @@ Kubernetes core/v1.PodSecurityContext
 <td>
 <em>(Optional)</em>
 <p>PodSecurityContext of the component</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>priorityClassName</code></br>
+<em>
+string
+</em>
+</td>
+<td>
+<p>PriorityClassName of Restore Job Pods</p>
 </td>
 </tr>
 </tbody>
@@ -11858,7 +12023,19 @@ map[string]string
 </td>
 <td>
 <em>(Optional)</em>
-<p>Additional annotations of the kubernetes service object</p>
+<p>Additional annotations for the service</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>labels</code></br>
+<em>
+map[string]string
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Additional labels for the service</p>
 </td>
 </tr>
 <tr>
@@ -12179,12 +12356,16 @@ LocalStorageProvider
 <p>
 (<em>Appears on:</em>
 <a href="#pdspec">PDSpec</a>, 
+<a href="#ticdcspec">TiCDCSpec</a>, 
 <a href="#tidbspec">TiDBSpec</a>, 
 <a href="#tikvspec">TiKVSpec</a>)
 </p>
 <p>
-<p>StorageVolume configures additional storage for PD/TiDB/TiKV pods.
-If <code>StorageClassName</code> not set, default to the <code>spec.[pd|tidb|tikv].storageClassName</code></p>
+<p>StorageVolume configures additional PVC template for StatefulSets and volumeMount for pods that mount this PVC.
+Note:
+If <code>MountPath</code> is not set, volumeMount will not be generated. (You may not want to set this field when you inject volumeMount
+in somewhere else such as Mutating Admission Webhook)
+If <code>StorageClassName</code> is not set, default to the <code>spec.${component}.storageClassName</code></p>
 </p>
 <table>
 <thead>
@@ -12555,15 +12736,32 @@ string
 <td>
 </td>
 </tr>
+<tr>
+<td>
+<code>version</code></br>
+<em>
+string
+</em>
+</td>
+<td>
+</td>
+</tr>
+<tr>
+<td>
+<code>isOwner</code></br>
+<em>
+bool
+</em>
+</td>
+<td>
+</td>
+</tr>
 </tbody>
 </table>
 <h3 id="ticdcconfig">TiCDCConfig</h3>
 <p>
-(<em>Appears on:</em>
-<a href="#ticdcspec">TiCDCSpec</a>)
-</p>
-<p>
-<p>TiCDCConfig is the configuration of tidbcdc</p>
+<p>TiCDCConfig is the configuration of tidbcdc
+ref <a href="https://github.com/pingcap/ticdc/blob/a28d9e43532edc4a0380f0ef87314631bf18d866/pkg/config/config.go#L176">https://github.com/pingcap/ticdc/blob/a28d9e43532edc4a0380f0ef87314631bf18d866/pkg/config/config.go#L176</a></p>
 </p>
 <table>
 <thead>
@@ -12724,14 +12922,41 @@ string
 <td>
 <code>config</code></br>
 <em>
-<a href="#ticdcconfig">
-TiCDCConfig
+<a href="#cdcconfigwraper">
+CDCConfigWraper
 </a>
 </em>
 </td>
 <td>
 <em>(Optional)</em>
 <p>Config is the Configuration of tidbcdc servers</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>storageVolumes</code></br>
+<em>
+<a href="#storagevolume">
+[]StorageVolume
+</a>
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>StorageVolumes configure additional storage for TiCDC pods.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>storageClassName</code></br>
+<em>
+string
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>The storageClassName of the persistent volume for TiCDC data storage.
+Defaults to Kubernetes default storage class.</p>
 </td>
 </tr>
 </tbody>
@@ -19882,7 +20107,21 @@ map[string]string
 </td>
 <td>
 <em>(Optional)</em>
-<p>Base annotations of TiDB cluster Pods, components may add or override selectors upon this respectively</p>
+<p>Base annotations for TiDB cluster, all Pods in the cluster should have these annotations.
+Can be overrode by annotations in the specific component spec.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>labels</code></br>
+<em>
+map[string]string
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Base labels for TiDB cluster, all Pods in the cluster should have these labels.
+Can be overrode by labels in the specific component spec.</p>
 </td>
 </tr>
 <tr>
@@ -20115,18 +20354,6 @@ TiFlashStatus
 <em>
 <a href="#ticdcstatus">
 TiCDCStatus
-</a>
-</em>
-</td>
-<td>
-</td>
-</tr>
-<tr>
-<td>
-<code>monitor</code></br>
-<em>
-<a href="#tidbmonitorref">
-TidbMonitorRef
 </a>
 </em>
 </td>
@@ -20373,10 +20600,6 @@ InitializePhase
 </tbody>
 </table>
 <h3 id="tidbmonitorref">TidbMonitorRef</h3>
-<p>
-(<em>Appears on:</em>
-<a href="#tidbclusterstatus">TidbClusterStatus</a>)
-</p>
 <p>
 <p>TidbMonitorRef reference to a TidbMonitor</p>
 </p>
@@ -20625,6 +20848,17 @@ map[string]string
 </tr>
 <tr>
 <td>
+<code>labels</code></br>
+<em>
+map[string]string
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+</td>
+</tr>
+<tr>
+<td>
 <code>tolerations</code></br>
 <em>
 <a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.18/#toleration-v1-core">
@@ -20793,6 +21027,18 @@ DeploymentStorageStatus
 </td>
 <td>
 <p>Storage status for deployment</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>statefulSet</code></br>
+<em>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.18/#statefulsetstatus-v1-apps">
+Kubernetes apps/v1.StatefulSetStatus
+</a>
+</em>
+</td>
+<td>
 </td>
 </tr>
 </tbody>

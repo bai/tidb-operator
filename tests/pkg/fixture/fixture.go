@@ -74,6 +74,12 @@ var (
 	tikvV4Beta = semver.MustParse("v4.0.0-beta")
 )
 
+// ClusterCustomKey for label and ann to test
+const ClusterCustomKey = "cluster-test-key"
+
+// ComponentCustomKey for label and ann to test
+const ComponentCustomKey = "component-test-key"
+
 // GetTidbCluster returns a TidbCluster resource configured for testing
 func GetTidbCluster(ns, name, version string) *v1alpha1.TidbCluster {
 	// We assume all unparsable versions are greater or equal to v4.0.0-beta,
@@ -103,6 +109,12 @@ func GetTidbCluster(ns, name, version string) *v1alpha1.TidbCluster {
 			ConfigUpdateStrategy: v1alpha1.ConfigUpdateStrategyRollingUpdate,
 			SchedulerName:        "tidb-scheduler",
 			Timezone:             "Asia/Shanghai",
+			Labels: map[string]string{
+				ClusterCustomKey: "value",
+			},
+			Annotations: map[string]string{
+				ClusterCustomKey: "value",
+			},
 			PD: &v1alpha1.PDSpec{
 				Replicas:             3,
 				BaseImage:            "pingcap/pd",
@@ -115,6 +127,12 @@ func GetTidbCluster(ns, name, version string) *v1alpha1.TidbCluster {
 				}(),
 				ComponentSpec: v1alpha1.ComponentSpec{
 					Affinity: buildAffinity(name, ns, v1alpha1.PDMemberType),
+					Labels: map[string]string{
+						ComponentCustomKey: "value",
+					},
+					Annotations: map[string]string{
+						ComponentCustomKey: "value",
+					},
 				},
 			},
 
@@ -126,6 +144,12 @@ func GetTidbCluster(ns, name, version string) *v1alpha1.TidbCluster {
 				Config:               tikvConfig,
 				ComponentSpec: v1alpha1.ComponentSpec{
 					Affinity: buildAffinity(name, ns, v1alpha1.TiKVMemberType),
+					Labels: map[string]string{
+						ComponentCustomKey: "value",
+					},
+					Annotations: map[string]string{
+						ComponentCustomKey: "value",
+					},
 				},
 				EvictLeaderTimeout: pointer.StringPtr("1m"),
 			},
@@ -137,6 +161,12 @@ func GetTidbCluster(ns, name, version string) *v1alpha1.TidbCluster {
 				Service: &v1alpha1.TiDBServiceSpec{
 					ServiceSpec: v1alpha1.ServiceSpec{
 						Type: corev1.ServiceTypeClusterIP,
+						Labels: map[string]string{
+							ComponentCustomKey: "value",
+						},
+						Annotations: map[string]string{
+							ComponentCustomKey: "value",
+						},
 					},
 					ExposeStatus: pointer.BoolPtr(true),
 				},
@@ -145,8 +175,103 @@ func GetTidbCluster(ns, name, version string) *v1alpha1.TidbCluster {
 				Config:           tidbConfig,
 				ComponentSpec: v1alpha1.ComponentSpec{
 					Affinity: buildAffinity(name, ns, v1alpha1.TiDBMemberType),
+					Labels: map[string]string{
+						ComponentCustomKey: "value",
+					},
+					Annotations: map[string]string{
+						ComponentCustomKey: "value",
+					},
 				},
 			},
+		},
+	}
+}
+
+// GetDMCluster returns a DmCluster resource configured for testing.
+func GetDMCluster(ns, name, version string) *v1alpha1.DMCluster {
+	deletePVP := corev1.PersistentVolumeReclaimDelete
+	return &v1alpha1.DMCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+		},
+		Spec: v1alpha1.DMClusterSpec{
+			Version:         version,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			PVReclaimPolicy: &deletePVP,
+			SchedulerName:   "tidb-scheduler",
+			Timezone:        "Asia/Shanghai",
+			Labels: map[string]string{
+				ClusterCustomKey: "value",
+			},
+			Annotations: map[string]string{
+				ClusterCustomKey: "value",
+			},
+			Master: v1alpha1.MasterSpec{
+				Replicas:             3,
+				BaseImage:            "pingcap/dm",
+				MaxFailoverCount:     pointer.Int32Ptr(3),
+				StorageSize:          "1Gi",
+				ResourceRequirements: WithStorage(BurstableSmall, "1Gi"),
+				Config:               &v1alpha1.MasterConfig{},
+				Service: &v1alpha1.MasterServiceSpec{
+					ServiceSpec: v1alpha1.ServiceSpec{
+						Type: corev1.ServiceTypeClusterIP,
+						Labels: map[string]string{
+							ComponentCustomKey: "value",
+						},
+						Annotations: map[string]string{
+							ComponentCustomKey: "value",
+						},
+					},
+				},
+				ComponentSpec: v1alpha1.ComponentSpec{
+					Affinity: buildAffinity(name, ns, v1alpha1.DMMasterMemberType),
+					Labels: map[string]string{
+						ComponentCustomKey: "value",
+					},
+					Annotations: map[string]string{
+						ComponentCustomKey: "value",
+					},
+				},
+			},
+			Worker: &v1alpha1.WorkerSpec{
+				Replicas:             3,
+				BaseImage:            "pingcap/dm",
+				MaxFailoverCount:     pointer.Int32Ptr(3),
+				ResourceRequirements: WithStorage(BurstableSmall, "1Gi"),
+				Config:               &v1alpha1.WorkerConfig{},
+				ComponentSpec: v1alpha1.ComponentSpec{
+					Affinity: buildAffinity(name, ns, v1alpha1.DMWorkerMemberType),
+					Labels: map[string]string{
+						ComponentCustomKey: "value",
+					},
+					Annotations: map[string]string{
+						ComponentCustomKey: "value",
+					},
+				},
+			},
+		},
+	}
+}
+
+func UpdateTidbMonitorForDM(tm *v1alpha1.TidbMonitor, dc *v1alpha1.DMCluster) {
+	imagePullPolicy := *tm.Spec.Initializer.ImagePullPolicy
+	tm.Spec.DM = &v1alpha1.DMMonitorSpec{
+		Clusters: []v1alpha1.ClusterRef{
+			{
+				Name:      dc.Name,
+				Namespace: dc.Namespace,
+			},
+		},
+		Initializer: v1alpha1.InitializerSpec{
+			MonitorContainer: v1alpha1.MonitorContainer{
+				BaseImage:            utilimage.DMMonitorInitializerImage,
+				Version:              utilimage.DMMonitorInitializerVersion,
+				ImagePullPolicy:      &imagePullPolicy,
+				ResourceRequirements: corev1.ResourceRequirements{},
+			},
+			Envs: map[string]string{},
 		},
 	}
 }
@@ -180,6 +305,12 @@ func GetTidbInitializer(ns, tcName, initName, initPassWDName, initTLSName string
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      initName,
 			Namespace: ns,
+			Labels: map[string]string{
+				ClusterCustomKey: "value",
+			},
+			Annotations: map[string]string{
+				ClusterCustomKey: "value",
+			},
 		},
 		Spec: v1alpha1.TidbInitializerSpec{
 			Image: "tnir/mysqlclient",
@@ -206,12 +337,23 @@ func NewTidbMonitor(name, namespace string, tc *v1alpha1.TidbCluster, grafanaEna
 					Namespace: tc.Namespace,
 				},
 			},
+			Labels: map[string]string{
+				ClusterCustomKey: "value",
+			},
+			Annotations: map[string]string{
+				ClusterCustomKey: "value",
+			},
 			Prometheus: v1alpha1.PrometheusSpec{
 				ReserveDays: 7,
 				LogLevel:    "info",
 				Service: v1alpha1.ServiceSpec{
-					Type:        "ClusterIP",
-					Annotations: map[string]string{},
+					Type: "ClusterIP",
+					Labels: map[string]string{
+						ComponentCustomKey: "value",
+					},
+					Annotations: map[string]string{
+						ComponentCustomKey: "value",
+					},
 				},
 				MonitorContainer: v1alpha1.MonitorContainer{
 					BaseImage:            utilimage.PrometheusImage,
@@ -228,8 +370,13 @@ func NewTidbMonitor(name, namespace string, tc *v1alpha1.TidbCluster, grafanaEna
 					ResourceRequirements: corev1.ResourceRequirements{},
 				},
 				Service: v1alpha1.ServiceSpec{
-					Type:        "ClusterIP",
-					Annotations: map[string]string{},
+					Type: "ClusterIP",
+					Labels: map[string]string{
+						ComponentCustomKey: "value",
+					},
+					Annotations: map[string]string{
+						ComponentCustomKey: "value",
+					},
 				},
 			},
 			Initializer: v1alpha1.InitializerSpec{
@@ -266,8 +413,13 @@ func NewTidbMonitor(name, namespace string, tc *v1alpha1.TidbCluster, grafanaEna
 			Username: "admin",
 			Password: "admin",
 			Service: v1alpha1.ServiceSpec{
-				Type:        corev1.ServiceTypeClusterIP,
-				Annotations: map[string]string{},
+				Type: corev1.ServiceTypeClusterIP,
+				Labels: map[string]string{
+					ComponentCustomKey: "value",
+				},
+				Annotations: map[string]string{
+					ComponentCustomKey: "value",
+				},
 			},
 			Envs: map[string]string{
 				"A":    "B",
@@ -494,6 +646,7 @@ func AddTiCDCForTidbCluster(tc *v1alpha1.TidbCluster) *v1alpha1.TidbCluster {
 	tc.Spec.TiCDC = &v1alpha1.TiCDCSpec{
 		BaseImage: "pingcap/ticdc",
 		Replicas:  1,
+		Config:    v1alpha1.NewCDCConfig(),
 	}
 	return tc
 }

@@ -16,6 +16,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	_ "net/http/pprof"
 	"os"
@@ -38,11 +39,14 @@ import (
 	utilimage "github.com/pingcap/tidb-operator/tests/e2e/util/image"
 	utilnode "github.com/pingcap/tidb-operator/tests/e2e/util/node"
 	utiloperator "github.com/pingcap/tidb-operator/tests/e2e/util/operator"
+	"github.com/pingcap/tidb-operator/tests/e2e/util/portforward"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	runtimeutils "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -71,13 +75,8 @@ var (
 // (such as deleting old namespaces, or verifying that all system pods are running.
 // Because of the way Ginkgo runs tests in parallel, we must use SynchronizedBeforeSuite
 // to ensure that these operations only run on the first parallel Ginkgo node.
-func setupSuite() {
+func setupSuite(c kubernetes.Interface, extClient versioned.Interface, apiExtClient apiextensionsclientset.Interface) {
 	// Run only on Ginkgo node 1
-
-	c, err := framework.LoadClientset()
-	if err != nil {
-		log.Failf("Error loading client: %v", err)
-	}
 
 	// Delete any namespaces except those created by the system. This ensures no
 	// lingering resources are left over from a previous test run.
@@ -99,6 +98,12 @@ func setupSuite() {
 		if err != nil {
 			log.Failf("Error deleting orphaned namespaces: %v", err)
 		}
+
+		// try to clean up backups
+		if err := ForceCleanBackups(c, extClient, apiExtClient); err != nil {
+			log.Failf("Error clean backups: %v", err)
+		}
+
 		log.Logf("Waiting for deletion of the following namespaces: %v", deleted)
 		if err := framework.WaitForNamespacesDeleted(c, deleted, framework.NamespaceCleanupTimeout); err != nil {
 			log.Failf("Failed to delete orphaned namespaces %v: %v", deleted, err)
@@ -179,7 +184,7 @@ func setupSuite() {
 	// Log the version of the server and this client.
 	log.Logf("e2e test version: %s", version.Get().GitVersion)
 
-	dc := c.DiscoveryClient
+	dc := c.Discovery()
 
 	serverVersion, serverErr := dc.ServerVersion()
 	if serverErr != nil {
@@ -221,18 +226,6 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 		}
 	}
 
-	setupSuite()
-	// override with hard-coded value
-	e2econfig.TestConfig.ManifestDir = "/manifests"
-	framework.Logf("====== e2e configuration ======")
-	framework.Logf("%s", e2econfig.TestConfig.MustPrettyPrintJSON())
-	// preload images
-	if e2econfig.TestConfig.PreloadImages {
-		ginkgo.By("Preloading images")
-		if err := utilimage.PreloadImages(); err != nil {
-			framework.Failf("failed to pre-load images: %v", err)
-		}
-	}
 	// Get clients
 	config, err := framework.LoadConfig()
 	framework.ExpectNoError(err, "failed to load config")
@@ -248,6 +241,23 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 	framework.ExpectNoError(err, "failed to create clientset for apiextensions-apiserver")
 	asCli, err := asclientset.NewForConfig(config)
 	framework.ExpectNoError(err, "failed to create clientset for advanced-statefulset")
+	clientRawConfig, err := e2econfig.LoadClientRawConfig()
+	framework.ExpectNoError(err, "failed to load raw config for tidb operator")
+	fw, err := portforward.NewPortForwarder(context.Background(), e2econfig.NewSimpleRESTClientGetter(clientRawConfig))
+	framework.ExpectNoError(err, "failed to create port forwarder")
+
+	setupSuite(kubeCli, cli, apiExtCli)
+	// override with hard-coded value
+	e2econfig.TestConfig.ManifestDir = "/manifests"
+	framework.Logf("====== e2e configuration ======")
+	framework.Logf("%s", e2econfig.TestConfig.MustPrettyPrintJSON())
+	// preload images
+	if e2econfig.TestConfig.PreloadImages {
+		ginkgo.By("Preloading images")
+		if err := utilimage.PreloadImages(); err != nil {
+			framework.Failf("failed to pre-load images: %v", err)
+		}
+	}
 
 	ginkgo.By("Recycle all local PVs")
 	pvList, err := kubeCli.CoreV1().PersistentVolumes().List(metav1.ListOptions{})
@@ -284,7 +294,7 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 	framework.ExpectNoError(err, "failed to wait for all PVs to be available")
 
 	ginkgo.By("Labeling nodes")
-	oa := tests.NewOperatorActions(cli, kubeCli, asCli, aggrCli, apiExtCli, tests.DefaultPollInterval, nil, e2econfig.TestConfig, nil, nil, nil)
+	oa := tests.NewOperatorActions(cli, kubeCli, asCli, aggrCli, apiExtCli, tests.DefaultPollInterval, nil, e2econfig.TestConfig, nil, fw, nil)
 	oa.LabelNodesOrDie()
 	if e2econfig.TestConfig.InstallOperator {
 		OperatorFeatures := map[string]bool{"AutoScaling": true}
@@ -311,8 +321,15 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 			operatorKillerStopCh := make(chan struct{})
 			go operatorKiller.Run(operatorKillerStopCh)
 		}
+
+		// only deploy MySQL and TiDB for DM if CRDs and TiDB Operator installed.
+		// setup upstream MySQL instances and the downstream TiDB cluster for DM testing.
+		// if we can only setup these resource for DM tests with something like `--focus` or `--skip`, that should be better.
+		oa.DeployDMMySQLOrDie(tests.DMMySQLNamespace)
+		oa.DeployDMTiDBOrDie()
 	} else {
 		ginkgo.By("Skip installing tidb-operator")
+		ginkgo.By("Skip installing MySQL and TiDB for DM tests")
 	}
 
 	ginkgo.By("Installing cert-manager")
@@ -335,6 +352,7 @@ var _ = ginkgo.SynchronizedAfterSuite(func() {
 	config, _ := framework.LoadConfig()
 	config.QPS = 20
 	config.Burst = 50
+	cli, _ := versioned.NewForConfig(config)
 	kubeCli, _ := kubernetes.NewForConfig(config)
 	if !ginkgo.CurrentGinkgoTestDescription().Failed {
 		ginkgo.By("Clean labels")
@@ -346,6 +364,12 @@ var _ = ginkgo.SynchronizedAfterSuite(func() {
 	err := tidbcluster.DeleteCertManager(kubeCli)
 	framework.ExpectNoError(err, "failed to delete cert-manager")
 
+	err = tests.CleanDMMySQL(kubeCli, tests.DMMySQLNamespace)
+	framework.ExpectNoError(err, "failed to clean DM MySQL")
+	err = tests.CleanDMTiDB(cli, kubeCli)
+	framework.ExpectNoError(err, "failed to clean DM TiDB")
+
+	ginkgo.By("Uninstalling tidb-operator")
 	ocfg := e2econfig.NewDefaultOperatorConfig(e2econfig.TestConfig)
 
 	// kubetest2 can only dump running pods' log (copy from container log directory),
@@ -383,6 +407,41 @@ var _ = ginkgo.SynchronizedAfterSuite(func() {
 	})
 	framework.ExpectNoError(err, "failed to wait for tidb-operator to be uninstalled")
 })
+
+// TODO: refactor it to combine with code in /tests/e2e/br/framework/framework.go
+// If namespace is deleted directly, all resource in this namespace will be deleted.
+// However, backup finalizer is depend on some resource such as Secret in the namespace, so finalizer will always fail and block namespace deletion.
+func ForceCleanBackups(kubeClient kubernetes.Interface, extClient versioned.Interface, apiExtClient apiextensionsclientset.Interface) error {
+	if _, err := apiExtClient.ApiextensionsV1().CustomResourceDefinitions().Get("backups.pingcap.com", metav1.GetOptions{}); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+		return nil
+	}
+	nsList, err := kubeClient.CoreV1().Namespaces().List(metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, item := range nsList.Items {
+		ns := item.Name
+		bl, err := extClient.PingcapV1alpha1().Backups(ns).List(metav1.ListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to list backups in namespace %s: %v", ns, err)
+		}
+		for i := range bl.Items {
+			name := bl.Items[i].Name
+			if err := extClient.PingcapV1alpha1().Backups(ns).Delete(name, nil); err != nil {
+				return fmt.Errorf("failed to delete backup(%s) in namespace %s: %v", name, ns, err)
+			}
+			// use patch to avoid update conflicts
+			patch := []byte(`[{"op":"remove","path":"/metadata/finalizers"}]`)
+			if _, err := extClient.PingcapV1alpha1().Backups(ns).Patch(name, types.JSONPatchType, patch); err != nil {
+				return fmt.Errorf("failed to clean backup(%s) finalizers in namespace %s: %v", name, ns, err)
+			}
+		}
+	}
+	return err
+}
 
 // RunE2ETests checks configuration parameters (specified through flags) and then runs
 // E2E tests using the Ginkgo runner.

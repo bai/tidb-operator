@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
 	"github.com/pingcap/tidb-operator/pkg/controller"
 	"github.com/pingcap/tidb-operator/pkg/label"
-	"github.com/pingcap/tidb-operator/pkg/manager/member"
 	"github.com/pingcap/tidb-operator/pkg/util"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
@@ -406,7 +405,7 @@ func getMonitorDMInitContainer(monitor *v1alpha1.TidbMonitor, dc *v1alpha1.DMClu
 	return container
 }
 
-func getMonitorPrometheusContainer(monitor *v1alpha1.TidbMonitor, tc *v1alpha1.TidbCluster, dc *v1alpha1.DMCluster) core.Container {
+func getMonitorPrometheusContainer(monitor *v1alpha1.TidbMonitor, tc *v1alpha1.TidbCluster) core.Container {
 	commands := []string{"sed 's/$NAMESPACE/'\"$NAMESPACE\"'/g;s/$POD_NAME/'\"$POD_NAME\"'/g' /etc/prometheus/config/prometheus.yml > /etc/prometheus/config_out/prometheus.yml && /bin/prometheus --web.enable-admin-api --web.enable-lifecycle --config.file=/etc/prometheus/config_out/prometheus.yml --storage.tsdb.path=/data/prometheus " + fmt.Sprintf("--storage.tsdb.retention=%dd", monitor.Spec.Prometheus.ReserveDays)}
 	c := core.Container{
 		Name:      "prometheus",
@@ -479,6 +478,25 @@ func getMonitorPrometheusContainer(monitor *v1alpha1.TidbMonitor, tc *v1alpha1.T
 		commands = append(commands, "--storage.tsdb.max-block-duration=2h")
 		commands = append(commands, "--storage.tsdb.min-block-duration=2h")
 	}
+
+	//Add readiness probe. LivenessProbe probe will affect prom wal replay,ref: https://github.com/prometheus-operator/prometheus-operator/pull/3502
+	var readinessProbeHandler core.Handler
+	{
+		readyPath := "/-/ready"
+		readinessProbeHandler.HTTPGet = &core.HTTPGetAction{
+			Path: readyPath,
+			Port: intstr.FromInt(9090),
+		}
+
+	}
+	readinessProbe := &core.Probe{
+		Handler:          readinessProbeHandler,
+		TimeoutSeconds:   3,
+		PeriodSeconds:    5,
+		FailureThreshold: 120, // Allow up to 10m on startup for data recovery
+	}
+	c.ReadinessProbe = readinessProbe
+
 	c.Command = append(c.Command, strings.Join(commands, " "))
 	if monitor.Spec.Prometheus.ImagePullPolicy != nil {
 		c.ImagePullPolicy = *monitor.Spec.Prometheus.ImagePullPolicy
@@ -555,6 +573,37 @@ func getMonitorGrafanaContainer(secret *core.Secret, monitor *v1alpha1.TidbMonit
 			},
 		},
 	}
+
+	var probeHandler core.Handler
+	{
+		readyPath := "/api/health"
+		probeHandler.HTTPGet = &core.HTTPGetAction{
+			Path: readyPath,
+			Port: intstr.FromInt(3000),
+		}
+
+	}
+	//add readiness probe
+	readinessProbe := &core.Probe{
+		Handler:          probeHandler,
+		TimeoutSeconds:   5,
+		PeriodSeconds:    10,
+		SuccessThreshold: 1,
+	}
+	c.ReadinessProbe = readinessProbe
+
+	//add liveness probe
+	livenessProbe := &core.Probe{
+		Handler:             probeHandler,
+		TimeoutSeconds:      5,
+		FailureThreshold:    10,
+		PeriodSeconds:       10,
+		SuccessThreshold:    1,
+		InitialDelaySeconds: 30,
+	}
+
+	c.LivenessProbe = livenessProbe
+
 	if monitor.Spec.Grafana.ImagePullPolicy != nil {
 		c.ImagePullPolicy = *monitor.Spec.Grafana.ImagePullPolicy
 	}
@@ -567,6 +616,10 @@ func getMonitorGrafanaContainer(secret *core.Secret, monitor *v1alpha1.TidbMonit
 	}
 	c.Env = util.AppendOverwriteEnv(c.Env, envOverrides)
 	sort.Sort(util.SortEnvByName(c.Env))
+
+	if monitor.Spec.Grafana.AdditionalVolumeMounts != nil {
+		c.VolumeMounts = append(c.VolumeMounts, monitor.Spec.Grafana.AdditionalVolumeMounts...)
+	}
 	return c
 }
 
@@ -613,7 +666,7 @@ func getMonitorReloaderContainer(monitor *v1alpha1.TidbMonitor, tc *v1alpha1.Tid
 	return c
 }
 
-func getMonitorVolumes(config *core.ConfigMap, monitor *v1alpha1.TidbMonitor, tc *v1alpha1.TidbCluster, dc *v1alpha1.DMCluster) []core.Volume {
+func getMonitorVolumes(config *core.ConfigMap, monitor *v1alpha1.TidbMonitor) []core.Volume {
 	volumes := []core.Volume{}
 	if !monitor.Spec.Persistent {
 		monitorData := core.Volume{
@@ -740,9 +793,9 @@ func getMonitorService(monitor *v1alpha1.TidbMonitor) []*core.Service {
 		ObjectMeta: meta.ObjectMeta{
 			Name:            prometheusName,
 			Namespace:       monitor.Namespace,
-			Labels:          promeLabel.Labels(),
+			Labels:          util.CombineStringMap(promeLabel.Labels(), monitor.Spec.Prometheus.Service.Labels, monitor.Spec.Labels),
 			OwnerReferences: []meta.OwnerReference{controller.GetTiDBMonitorOwnerRef(monitor)},
-			Annotations:     monitor.Spec.Prometheus.Service.Annotations,
+			Annotations:     util.CombineStringMap(monitor.Spec.Prometheus.Service.Annotations, monitor.Spec.Annotations),
 		},
 		Spec: core.ServiceSpec{
 			Ports: []core.ServicePort{
@@ -784,9 +837,9 @@ func getMonitorService(monitor *v1alpha1.TidbMonitor) []*core.Service {
 		ObjectMeta: meta.ObjectMeta{
 			Name:            reloaderName,
 			Namespace:       monitor.Namespace,
-			Labels:          buildTidbMonitorLabel(monitor.Name),
+			Labels:          util.CombineStringMap(buildTidbMonitorLabel(monitor.Name), monitor.Spec.Reloader.Service.Labels, monitor.Spec.Labels),
 			OwnerReferences: []meta.OwnerReference{controller.GetTiDBMonitorOwnerRef(monitor)},
-			Annotations:     monitor.Spec.Prometheus.Service.Annotations,
+			Annotations:     util.CombineStringMap(monitor.Spec.Reloader.Service.Annotations, monitor.Spec.Annotations),
 		},
 		Spec: core.ServiceSpec{
 			Ports: []core.ServicePort{
@@ -817,9 +870,9 @@ func getMonitorService(monitor *v1alpha1.TidbMonitor) []*core.Service {
 			ObjectMeta: meta.ObjectMeta{
 				Name:            grafanaName(monitor),
 				Namespace:       monitor.Namespace,
-				Labels:          grafanaLabel.Labels(),
+				Labels:          util.CombineStringMap(grafanaLabel.Labels(), monitor.Spec.Grafana.Service.Labels, monitor.Spec.Labels),
 				OwnerReferences: []meta.OwnerReference{controller.GetTiDBMonitorOwnerRef(monitor)},
-				Annotations:     monitor.Spec.Grafana.Service.Annotations,
+				Annotations:     util.CombineStringMap(monitor.Spec.Grafana.Service.Annotations, monitor.Spec.Annotations),
 			},
 			Spec: core.ServiceSpec{
 				Ports: []core.ServicePort{
@@ -939,7 +992,7 @@ func getMonitorStatefulSet(sa *core.ServiceAccount, config *core.ConfigMap, secr
 		dmInitContainer := getMonitorDMInitContainer(monitor, dc, tc)
 		statefulSet.Spec.Template.Spec.InitContainers = append(statefulSet.Spec.Template.Spec.InitContainers, dmInitContainer)
 	}
-	prometheusContainer := getMonitorPrometheusContainer(monitor, tc, dc)
+	prometheusContainer := getMonitorPrometheusContainer(monitor, tc)
 	reloaderContainer := getMonitorReloaderContainer(monitor, tc)
 	statefulSet.Spec.Template.Spec.Containers = append(statefulSet.Spec.Template.Spec.Containers, prometheusContainer, reloaderContainer)
 	if monitor.Spec.Thanos != nil {
@@ -954,7 +1007,7 @@ func getMonitorStatefulSet(sa *core.ServiceAccount, config *core.ConfigMap, secr
 		grafanaContainer := getMonitorGrafanaContainer(secret, monitor, tc)
 		statefulSet.Spec.Template.Spec.Containers = append(statefulSet.Spec.Template.Spec.Containers, grafanaContainer)
 	}
-	volumes := getMonitorVolumes(config, monitor, tc, dc)
+	volumes := getMonitorVolumes(config, monitor)
 	statefulSet.Spec.Template.Spec.Volumes = volumes
 
 	volumeClaims := getMonitorVolumeClaims(monitor)
@@ -977,13 +1030,17 @@ func getMonitorStatefulSetSkeleton(sa *core.ServiceAccount, monitor *v1alpha1.Ti
 		replicas = *monitor.Spec.Replicas
 	}
 	name := GetMonitorObjectName(monitor)
+	stsLabels := buildTidbMonitorLabel(monitor.Name)
+	podLabels := util.CombineStringMap(stsLabels, monitor.Spec.Labels)
+	stsAnnotations := util.CopyStringMap(monitor.Spec.Annotations)
+	podAnnotations := util.CopyStringMap(monitor.Spec.Annotations)
 	statefulset := &apps.StatefulSet{
 		ObjectMeta: meta.ObjectMeta{
 			Name:            name,
 			Namespace:       monitor.Namespace,
-			Labels:          buildTidbMonitorLabel(monitor.Name),
+			Labels:          stsLabels,
 			OwnerReferences: []meta.OwnerReference{controller.GetTiDBMonitorOwnerRef(monitor)},
-			Annotations:     member.CopyAnnotations(monitor.Spec.Annotations),
+			Annotations:     stsAnnotations,
 		},
 		Spec: apps.StatefulSetSpec{
 			ServiceName: name,
@@ -992,12 +1049,12 @@ func getMonitorStatefulSetSkeleton(sa *core.ServiceAccount, monitor *v1alpha1.Ti
 				Type: apps.RollingUpdateStatefulSetStrategyType,
 			},
 			Selector: &meta.LabelSelector{
-				MatchLabels: buildTidbMonitorLabel(monitor.Name),
+				MatchLabels: stsLabels,
 			},
 			Template: core.PodTemplateSpec{
 				ObjectMeta: meta.ObjectMeta{
-					Labels:      buildTidbMonitorLabel(monitor.Name),
-					Annotations: member.CopyAnnotations(monitor.Spec.Annotations),
+					Labels:      podLabels,
+					Annotations: podAnnotations,
 				},
 
 				Spec: core.PodSpec{

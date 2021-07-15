@@ -59,7 +59,7 @@ func (s *generalScaler) deleteDeferDeletingPVC(controller runtime.Object, member
 	// for unit test
 	skipReason := map[string]string{}
 
-	selector, err := getPVCSelectorForPod(controller, memberType, ordinal)
+	selector, err := GetPVCSelectorForPod(controller, memberType, ordinal)
 	if err != nil {
 		return skipReason, fmt.Errorf("%s %s/%s assemble label selector failed, err: %v", kind, ns, meta.GetName(), err)
 	}
@@ -195,7 +195,7 @@ func scaleOne(actual *apps.StatefulSet, desired *apps.StatefulSet) (scaling int,
 		}
 	}
 	if additions.Len() > 0 {
-		// we always do scaling out before scaling in to maintain maximum avaiability
+		// we always do scaling out before scaling in to maintain maximum availability
 		scaling = 1
 		ordinal = additions.List()[0]
 		replicas++

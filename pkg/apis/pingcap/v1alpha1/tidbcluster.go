@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/tidb-operator/pkg/label"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog"
 )
 
 const (
@@ -35,7 +36,7 @@ const (
 	defaultSeparateRaftLog    = false
 	defaultEnablePVReclaim    = false
 	// defaultEvictLeaderTimeout is the timeout limit of evict leader
-	defaultEvictLeaderTimeout = 10 * time.Minute
+	defaultEvictLeaderTimeout = 1500 * time.Minute
 )
 
 var (
@@ -48,7 +49,14 @@ var (
 	defaultHelperSpec = HelperSpec{}
 )
 
+// PDImage return the image used by PD.
+//
+// If PD isn't specified, return empty string.
 func (tc *TidbCluster) PDImage() string {
+	if tc.Spec.PD == nil {
+		return ""
+	}
+
 	image := tc.Spec.PD.Image
 	baseImage := tc.Spec.PD.BaseImage
 	// base image takes higher priority
@@ -66,7 +74,14 @@ func (tc *TidbCluster) PDImage() string {
 	return image
 }
 
+// PDVersion return the image version used by PD.
+//
+// If PD isn't specified, return empty string.
 func (tc *TidbCluster) PDVersion() string {
+	if tc.Spec.PD == nil {
+		return ""
+	}
+
 	image := tc.PDImage()
 	colonIdx := strings.LastIndexByte(image, ':')
 	if colonIdx >= 0 {
@@ -76,7 +91,14 @@ func (tc *TidbCluster) PDVersion() string {
 	return "latest"
 }
 
+// TiKVImage return the image used by TiKV.
+//
+// If TiKV isn't specified, return empty string.
 func (tc *TidbCluster) TiKVImage() string {
+	if tc.Spec.TiKV == nil {
+		return ""
+	}
+
 	image := tc.Spec.TiKV.Image
 	baseImage := tc.Spec.TiKV.BaseImage
 	// base image takes higher priority
@@ -94,7 +116,14 @@ func (tc *TidbCluster) TiKVImage() string {
 	return image
 }
 
+// TiKVVersion return the image version used by TiKV.
+//
+// If TiKV isn't specified, return empty string.
 func (tc *TidbCluster) TiKVVersion() string {
+	if tc.Spec.TiKV == nil {
+		return ""
+	}
+
 	image := tc.TiKVImage()
 	colonIdx := strings.LastIndexByte(image, ':')
 	if colonIdx >= 0 {
@@ -105,7 +134,7 @@ func (tc *TidbCluster) TiKVVersion() string {
 }
 
 func (tc *TidbCluster) TiKVContainerPrivilege() *bool {
-	if tc.Spec.TiKV.Privileged == nil {
+	if tc.Spec.TiKV == nil || tc.Spec.TiKV.Privileged == nil {
 		pri := false
 		return &pri
 	}
@@ -113,7 +142,7 @@ func (tc *TidbCluster) TiKVContainerPrivilege() *bool {
 }
 
 func (tc *TidbCluster) TiKVEvictLeaderTimeout() time.Duration {
-	if tc.Spec.TiKV.EvictLeaderTimeout != nil {
+	if tc.Spec.TiKV != nil && tc.Spec.TiKV.EvictLeaderTimeout != nil {
 		d, err := time.ParseDuration(*tc.Spec.TiKV.EvictLeaderTimeout)
 		if err == nil {
 			return d
@@ -122,7 +151,14 @@ func (tc *TidbCluster) TiKVEvictLeaderTimeout() time.Duration {
 	return defaultEvictLeaderTimeout
 }
 
+// TiFlashImage return the image used by TiFlash.
+//
+// If TiFlash isn't specified, return empty string.
 func (tc *TidbCluster) TiFlashImage() string {
+	if tc.Spec.TiFlash == nil {
+		return ""
+	}
+
 	image := tc.Spec.TiFlash.Image
 	baseImage := tc.Spec.TiFlash.BaseImage
 	// base image takes higher priority
@@ -140,7 +176,14 @@ func (tc *TidbCluster) TiFlashImage() string {
 	return image
 }
 
+// TiCDCImage return the image used by TiCDC.
+//
+// If TiCDC isn't specified, return empty string.
 func (tc *TidbCluster) TiCDCImage() string {
+	if tc.Spec.TiCDC == nil {
+		return ""
+	}
+
 	image := tc.Spec.TiCDC.Image
 	baseImage := tc.Spec.TiCDC.BaseImage
 	// base image takes higher priority
@@ -159,14 +202,21 @@ func (tc *TidbCluster) TiCDCImage() string {
 }
 
 func (tc *TidbCluster) TiFlashContainerPrivilege() *bool {
-	if tc.Spec.TiFlash.Privileged == nil {
+	if tc.Spec.TiFlash == nil || tc.Spec.TiFlash.Privileged == nil {
 		pri := false
 		return &pri
 	}
 	return tc.Spec.TiFlash.Privileged
 }
 
+// TiDBImage return the image used by TiDB.
+//
+// If TiDB isn't specified, return empty string.
 func (tc *TidbCluster) TiDBImage() string {
+	if tc.Spec.TiDB == nil {
+		return ""
+	}
+
 	image := tc.Spec.TiDB.Image
 	baseImage := tc.Spec.TiDB.BaseImage
 	// base image takes higher priority
@@ -184,10 +234,14 @@ func (tc *TidbCluster) TiDBImage() string {
 	return image
 }
 
+// PumpImage return the image used by Pump.
+//
+// If Pump isn't specified, return nil.
 func (tc *TidbCluster) PumpImage() *string {
 	if tc.Spec.Pump == nil {
 		return nil
 	}
+
 	image := tc.Spec.Pump.Image
 	baseImage := tc.Spec.Pump.BaseImage
 	// base image takes higher priority
@@ -207,7 +261,7 @@ func (tc *TidbCluster) PumpImage() *string {
 
 func (tc *TidbCluster) HelperImage() string {
 	image := tc.GetHelperSpec().Image
-	if image == nil {
+	if image == nil && tc.Spec.TiDB != nil {
 		// for backward compatibility
 		image = tc.Spec.TiDB.GetSlowLogTailerSpec().Image
 	}
@@ -219,7 +273,7 @@ func (tc *TidbCluster) HelperImage() string {
 
 func (tc *TidbCluster) HelperImagePullPolicy() corev1.PullPolicy {
 	pp := tc.GetHelperSpec().ImagePullPolicy
-	if pp == nil {
+	if pp == nil && tc.Spec.TiDB != nil {
 		// for backward compatibility
 		pp = tc.Spec.TiDB.GetSlowLogTailerSpec().ImagePullPolicy
 	}
@@ -307,11 +361,24 @@ func (tc *TidbCluster) getDeleteSlots(component string) (deleteSlots sets.Int32)
 	return
 }
 
+// PDAllPodsStarted return whether all pods of PD are started.
+//
+// If PD isn't specified, return false.
 func (tc *TidbCluster) PDAllPodsStarted() bool {
+	if tc.Spec.PD == nil {
+		return false
+	}
 	return tc.PDStsDesiredReplicas() == tc.PDStsActualReplicas()
 }
 
+// PDAllMembersReady return whether all members of PD are ready.
+//
+// If PD isn't specified, return false.
 func (tc *TidbCluster) PDAllMembersReady() bool {
+	if tc.Spec.PD == nil {
+		return false
+	}
+
 	if int(tc.PDStsDesiredReplicas()) != len(tc.Status.PD.Members) {
 		return false
 	}
@@ -348,6 +415,9 @@ func (tc *TidbCluster) GetPDDeletedFailureReplicas() int32 {
 }
 
 func (tc *TidbCluster) PDStsDesiredReplicas() int32 {
+	if tc.Spec.PD == nil {
+		return 0
+	}
 	return tc.Spec.PD.Replicas + tc.GetPDDeletedFailureReplicas()
 }
 
@@ -360,6 +430,9 @@ func (tc *TidbCluster) PDStsActualReplicas() int32 {
 }
 
 func (tc *TidbCluster) PDStsDesiredOrdinals(excludeFailover bool) sets.Int32 {
+	if tc.Spec.PD == nil {
+		return sets.Int32{}
+	}
 	replicas := tc.Spec.PD.Replicas
 	if !excludeFailover {
 		replicas = tc.PDStsDesiredReplicas()
@@ -367,11 +440,24 @@ func (tc *TidbCluster) PDStsDesiredOrdinals(excludeFailover bool) sets.Int32 {
 	return helper.GetPodOrdinalsFromReplicasAndDeleteSlots(replicas, tc.getDeleteSlots(label.PDLabelVal))
 }
 
+// TiKVAllPodsStarted return whether all pods of TiKV are started.
+//
+// If TiKV isn't specified, return false.
 func (tc *TidbCluster) TiKVAllPodsStarted() bool {
+	if tc.Spec.TiKV == nil {
+		return false
+	}
 	return tc.TiKVStsDesiredReplicas() == tc.TiKVStsActualReplicas()
 }
 
+// TiKVAllStoresReady return whether all stores of TiKV are ready.
+//
+// If TiKV isn't specified, return false.
 func (tc *TidbCluster) TiKVAllStoresReady() bool {
+	if tc.Spec.TiKV == nil {
+		return false
+	}
+
 	if int(tc.TiKVStsDesiredReplicas()) != len(tc.Status.TiKV.Stores) {
 		return false
 	}
@@ -386,6 +472,9 @@ func (tc *TidbCluster) TiKVAllStoresReady() bool {
 }
 
 func (tc *TidbCluster) TiKVStsDesiredReplicas() int32 {
+	if tc.Spec.TiKV == nil {
+		return 0
+	}
 	return tc.Spec.TiKV.Replicas + int32(len(tc.Status.TiKV.FailureStores))
 }
 
@@ -398,6 +487,9 @@ func (tc *TidbCluster) TiKVStsActualReplicas() int32 {
 }
 
 func (tc *TidbCluster) TiKVStsDesiredOrdinals(excludeFailover bool) sets.Int32 {
+	if tc.Spec.TiKV == nil {
+		return sets.Int32{}
+	}
 	replicas := tc.Spec.TiKV.Replicas
 	if !excludeFailover {
 		replicas = tc.TiKVStsDesiredReplicas()
@@ -405,11 +497,24 @@ func (tc *TidbCluster) TiKVStsDesiredOrdinals(excludeFailover bool) sets.Int32 {
 	return helper.GetPodOrdinalsFromReplicasAndDeleteSlots(replicas, tc.getDeleteSlots(label.TiKVLabelVal))
 }
 
+// TiFlashAllPodsStarted return whether all pods of TiFlash are started.
+//
+// If TiFlash isn't specified, return false.
 func (tc *TidbCluster) TiFlashAllPodsStarted() bool {
+	if tc.Spec.TiFlash == nil {
+		return false
+	}
 	return tc.TiFlashStsDesiredReplicas() == tc.TiFlashStsActualReplicas()
 }
 
+// TiFlashAllPodsStarted return whether all stores of TiFlash are ready.
+//
+// If TiFlash isn't specified, return false.
 func (tc *TidbCluster) TiFlashAllStoresReady() bool {
+	if tc.Spec.TiFlash == nil {
+		return false
+	}
+
 	if int(tc.TiFlashStsDesiredReplicas()) != len(tc.Status.TiFlash.Stores) {
 		return false
 	}
@@ -457,11 +562,24 @@ func (tc *TidbCluster) TiFlashStsDesiredOrdinals(excludeFailover bool) sets.Int3
 	return helper.GetPodOrdinalsFromReplicasAndDeleteSlots(replicas, tc.getDeleteSlots(label.TiFlashLabelVal))
 }
 
+// TiDBAllPodsStarted return whether all pods of TiDB are started.
+//
+// If TiDB isn't specified, return false.
 func (tc *TidbCluster) TiDBAllPodsStarted() bool {
+	if tc.Spec.TiDB == nil {
+		return false
+	}
 	return tc.TiDBStsDesiredReplicas() == tc.TiDBStsActualReplicas()
 }
 
+// TiDBAllMembersReady return whether all members of TiDB are ready.
+//
+// If TiDB isn't specified, return false.
 func (tc *TidbCluster) TiDBAllMembersReady() bool {
+	if tc.Spec.TiDB == nil {
+		return false
+	}
+
 	if int(tc.TiDBStsDesiredReplicas()) != len(tc.Status.TiDB.Members) {
 		return false
 	}
@@ -476,6 +594,9 @@ func (tc *TidbCluster) TiDBAllMembersReady() bool {
 }
 
 func (tc *TidbCluster) TiDBStsDesiredReplicas() int32 {
+	if tc.Spec.TiDB == nil {
+		return 0
+	}
 	return tc.Spec.TiDB.Replicas + int32(len(tc.Status.TiDB.FailureMembers))
 }
 
@@ -488,6 +609,9 @@ func (tc *TidbCluster) TiDBStsActualReplicas() int32 {
 }
 
 func (tc *TidbCluster) TiDBStsDesiredOrdinals(excludeFailover bool) sets.Int32 {
+	if tc.Spec.TiDB == nil {
+		return sets.Int32{}
+	}
 	replicas := tc.Spec.TiDB.Replicas
 	if !excludeFailover {
 		replicas = tc.TiDBStsDesiredReplicas()
@@ -495,12 +619,15 @@ func (tc *TidbCluster) TiDBStsDesiredOrdinals(excludeFailover bool) sets.Int32 {
 	return helper.GetPodOrdinalsFromReplicasAndDeleteSlots(replicas, tc.getDeleteSlots(label.TiDBLabelVal))
 }
 
+// PDIsAvailable return whether PD is available.
+//
+// If PD isn't specified, return true.
 func (tc *TidbCluster) PDIsAvailable() bool {
 	if tc.Spec.PD == nil {
 		return true
 	}
-	lowerLimit := (tc.Spec.PD.Replicas+int32(len(tc.Status.PD.PeerMembers)))/2 + 1
 
+	lowerLimit := (tc.Spec.PD.Replicas+int32(len(tc.Status.PD.PeerMembers)))/2 + 1
 	if int32(len(tc.Status.PD.Members)+len(tc.Status.PD.PeerMembers)) < lowerLimit {
 		return false
 	}
@@ -605,7 +732,11 @@ func (tc *TidbCluster) IsPVReclaimEnabled() bool {
 }
 
 func (tc *TidbCluster) IsTiDBBinlogEnabled() bool {
-	binlogEnabled := tc.Spec.TiDB.BinlogEnabled
+	var binlogEnabled *bool
+	if tc.Spec.TiDB != nil {
+		binlogEnabled = tc.Spec.TiDB.BinlogEnabled
+	}
+
 	if binlogEnabled == nil {
 		isPumpCreated := tc.Spec.Pump != nil
 		return isPumpCreated
@@ -697,38 +828,67 @@ func (tc *TidbCluster) SkipTLSWhenConnectTiDB() bool {
 	return ok
 }
 
+// TODO: We Should better do not specified the default value ourself if user not specified the item.
 func (tc *TidbCluster) TiCDCTimezone() string {
-	if tc.Spec.TiCDC != nil && tc.Spec.TiCDC.Config != nil && tc.Spec.TiCDC.Config.Timezone != nil {
-		return *tc.Spec.TiCDC.Config.Timezone
-	}
+	if tc.Spec.TiCDC != nil && tc.Spec.TiCDC.Config != nil {
+		if v := tc.Spec.TiCDC.Config.Get("tz"); v != nil {
+			tz, err := v.AsString()
+			if err != nil {
+				klog.Warningf("'%s/%s' incorrect tz type %v", tc.Namespace, tc.Name, v.Interface())
+			} else {
+				return tz
+			}
+		}
 
+	}
 	return tc.Timezone()
 }
 
 func (tc *TidbCluster) TiCDCGCTTL() int32 {
-	if tc.Spec.TiCDC != nil && tc.Spec.TiCDC.Config != nil && tc.Spec.TiCDC.Config.GCTTL != nil {
-		return *tc.Spec.TiCDC.Config.GCTTL
+	if tc.Spec.TiCDC != nil && tc.Spec.TiCDC.Config != nil {
+		if v := tc.Spec.TiCDC.Config.Get("gc-ttl"); v != nil {
+			ttl, err := v.AsInt()
+			if err != nil {
+				klog.Warningf("'%s/%s' incorrect gc-ttl type %v", tc.Namespace, tc.Name, v.Interface())
+			} else {
+				return int32(ttl)
+			}
+		}
 	}
 
 	return 86400
 }
 
 func (tc *TidbCluster) TiCDCLogFile() string {
-	if tc.Spec.TiCDC != nil && tc.Spec.TiCDC.Config != nil && tc.Spec.TiCDC.Config.LogFile != nil {
-		return *tc.Spec.TiCDC.Config.LogFile
+	if tc.Spec.TiCDC != nil && tc.Spec.TiCDC.Config != nil {
+		if v := tc.Spec.TiCDC.Config.Get("log-file"); v != nil {
+			file, err := v.AsString()
+			if err != nil {
+				klog.Warningf("'%s/%s' incorrect log-file type %v", tc.Namespace, tc.Name, v.Interface())
+			} else {
+				return file
+			}
+		}
 	}
 
 	return "/dev/stderr"
 }
 
 func (tc *TidbCluster) TiCDCLogLevel() string {
-	if tc.Spec.TiCDC != nil && tc.Spec.TiCDC.Config != nil && tc.Spec.TiCDC.Config.LogLevel != nil {
-		return *tc.Spec.TiCDC.Config.LogLevel
+	if tc.Spec.TiCDC != nil && tc.Spec.TiCDC.Config != nil {
+		if v := tc.Spec.TiCDC.Config.Get("log-level"); v != nil {
+			level, err := v.AsString()
+			if err != nil {
+				klog.Warningf("'%s/%s' incorrect log-level type %v", tc.Namespace, tc.Name, v.Interface())
+			} else {
+				return level
+			}
+		}
 	}
 
 	return "info"
 }
 
-func (tc *TidbCluster) IsHeterogeneous() bool {
+func (tc *TidbCluster) HeterogeneousWithoutLocalPD() bool {
 	return tc.Spec.Cluster != nil && len(tc.Spec.Cluster.Name) > 0 && tc.Spec.PD == nil
 }

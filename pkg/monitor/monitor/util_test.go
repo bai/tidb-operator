@@ -242,6 +242,7 @@ func TestGetMonitorService(t *testing.T) {
 							"app.kubernetes.io/component":  "monitor",
 							"app.kubernetes.io/used-by":    "prometheus",
 						},
+						Annotations: map[string]string{},
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "pingcap.com/v1alpha1",
@@ -283,6 +284,7 @@ func TestGetMonitorService(t *testing.T) {
 							"app.kubernetes.io/managed-by": "tidb-operator",
 							"app.kubernetes.io/name":       "tidb-cluster",
 						},
+						Annotations: map[string]string{},
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "pingcap.com/v1alpha1",
@@ -367,6 +369,7 @@ func TestGetMonitorService(t *testing.T) {
 							"app.kubernetes.io/component":  "monitor",
 							"app.kubernetes.io/used-by":    "prometheus",
 						},
+						Annotations: map[string]string{},
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "pingcap.com/v1alpha1",
@@ -414,6 +417,7 @@ func TestGetMonitorService(t *testing.T) {
 							"app.kubernetes.io/managed-by": "tidb-operator",
 							"app.kubernetes.io/name":       "tidb-cluster",
 						},
+						Annotations: map[string]string{},
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "pingcap.com/v1alpha1",
@@ -461,6 +465,7 @@ func TestGetMonitorService(t *testing.T) {
 							"app.kubernetes.io/component":  "monitor",
 							"app.kubernetes.io/used-by":    "grafana",
 						},
+						Annotations: map[string]string{},
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "pingcap.com/v1alpha1",
@@ -527,6 +532,7 @@ func TestGetMonitorService(t *testing.T) {
 							"app.kubernetes.io/component":  "monitor",
 							"app.kubernetes.io/used-by":    "prometheus",
 						},
+						Annotations: map[string]string{},
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "pingcap.com/v1alpha1",
@@ -568,6 +574,7 @@ func TestGetMonitorService(t *testing.T) {
 							"app.kubernetes.io/managed-by": "tidb-operator",
 							"app.kubernetes.io/name":       "tidb-cluster",
 						},
+						Annotations: map[string]string{},
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "pingcap.com/v1alpha1",
@@ -622,6 +629,7 @@ func TestGetMonitorService(t *testing.T) {
 							"app.kubernetes.io/name":       "tidb-cluster",
 							"app.kubernetes.io/used-by":    "grafana",
 						},
+						Annotations: map[string]string{},
 					},
 					Spec: corev1.ServiceSpec{
 						Ports: []corev1.ServicePort{
@@ -882,7 +890,7 @@ func TestGetMonitorVolumes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cm, err := getMonitorConfigMap(&tt.monitor, nil, nil)
 			g.Expect(err).NotTo(HaveOccurred())
-			sa := getMonitorVolumes(cm, &tt.monitor, &tt.cluster, &tt.dmCluster)
+			sa := getMonitorVolumes(cm, &tt.monitor)
 			tt.expected(sa)
 		})
 	}
@@ -957,6 +965,17 @@ func TestGetMonitorPrometheusContainer(t *testing.T) {
 					},
 				},
 				Resources: corev1.ResourceRequirements{},
+				ReadinessProbe: &corev1.Probe{
+					Handler: corev1.Handler{
+						HTTPGet: &corev1.HTTPGetAction{
+							Path: "/-/ready",
+							Port: intstr.FromInt(9090),
+						},
+					},
+					TimeoutSeconds:   3,
+					PeriodSeconds:    5,
+					FailureThreshold: 120, // Allow up to 10m on startup for data recovery
+				},
 				VolumeMounts: []corev1.VolumeMount{
 					{
 						Name:      "prometheus-config-out",
@@ -990,7 +1009,7 @@ func TestGetMonitorPrometheusContainer(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			sa := getMonitorPrometheusContainer(&tt.monitor, &tt.cluster, nil)
+			sa := getMonitorPrometheusContainer(&tt.monitor, &tt.cluster)
 			if tt.expected == nil {
 				g.Expect(sa).To(BeNil())
 				return
@@ -1099,6 +1118,30 @@ func TestGetMonitorGrafanaContainer(t *testing.T) {
 						Name:      "grafana-dashboard",
 						MountPath: "/grafana-dashboard-definitions/tidb",
 					},
+				},
+				ReadinessProbe: &corev1.Probe{
+					Handler: corev1.Handler{
+						HTTPGet: &corev1.HTTPGetAction{
+							Path: "/api/health",
+							Port: intstr.FromInt(3000),
+						},
+					},
+					TimeoutSeconds:   5,
+					PeriodSeconds:    10,
+					SuccessThreshold: 1,
+				},
+				LivenessProbe: &corev1.Probe{
+					Handler: corev1.Handler{
+						HTTPGet: &corev1.HTTPGetAction{
+							Path: "/api/health",
+							Port: intstr.FromInt(3000),
+						},
+					},
+					TimeoutSeconds:      5,
+					FailureThreshold:    10,
+					PeriodSeconds:       10,
+					SuccessThreshold:    1,
+					InitialDelaySeconds: 30,
 				},
 			},
 		},
